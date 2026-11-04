@@ -1,0 +1,21 @@
+FROM python:3.12-slim
+
+# Optional trusted, unauthenticated package mirror; public PyPI is the default.
+ARG PIP_INDEX_URL=https://pypi.org/simple
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+WORKDIR /app
+
+COPY pyproject.toml uv.lock README.md LICENSE ./
+RUN python -m pip install --no-cache-dir uv==0.6.5 \
+    && python -m uv export --locked --extra azure --no-dev --no-emit-project --format requirements-txt -o /tmp/requirements.txt \
+    && python -m pip install --no-cache-dir -r /tmp/requirements.txt \
+    && rm -f /tmp/requirements.txt
+
+COPY src ./src
+RUN python -m pip install --no-cache-dir --no-deps .
+
+EXPOSE 8000
+USER 65532:65532
+CMD ["uvicorn", "ptu_batch.api:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,2 @@
+{"custom_id":"chat-1","method":"POST","url":"/v1/chat/completions","body":{"model":"ptu","messages":[{"role":"user","content":"Summarize why asynchronous inference helps steady PTU utilization in one sentence."}],"max_tokens":80}}
+{"custom_id":"chat-2","method":"POST","url":"/v1/chat/completions","body":{"model":"ptu","messages":[{"role":"user","content":"Reply with the word ready."}],"max_tokens":20}}

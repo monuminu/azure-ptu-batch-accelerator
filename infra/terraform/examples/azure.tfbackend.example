@@ -1,0 +1,9 @@
+# Copy outside the repository and replace all sample values.
+# Authentication uses Entra ID; never add keys, SAS tokens, or client secrets here.
+storage_account_name = "yourtfstateaccount"
+container_name       = "tfstate"
+key                  = "ptu-batch/production.tfstate"
+tenant_id            = "00000000-0000-0000-0000-000000000000"
+subscription_id      = "00000000-0000-0000-0000-000000000000"
+use_azuread_auth     = true
+use_cli              = true

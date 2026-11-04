@@ -1,0 +1,15 @@
+{
+  "subscription_id": "00000000-0000-0000-0000-000000000000",
+  "tenant_id": "11111111-1111-1111-1111-111111111111",
+  "location": "eastus",
+  "private_networking": true,
+  "vnet_address_space": "10.248.0.0/16",
+  "environment_name": "ptubatchprod",
+  "ptu_deployment_resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-existing-ai/providers/Microsoft.CognitiveServices/accounts/example-ai/deployments/existing-ptu",
+  "ptu_resource_endpoint": "https://example-ai.openai.azure.com/",
+  "ptu_deployment_name": "existing-ptu",
+  "ptu_alias": "ptu",
+  "create_api_registration": true,
+  "preauthorize_azure_cli": false,
+  "validation_only": false
+}

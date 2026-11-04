@@ -1,0 +1,78 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-and-bicep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv and build tool
+        run: python -m pip install uv==0.6.5
+      - name: Sync locked dependencies
+        run: uv sync --locked --all-extras
+      - name: Lint
+        run: uv run --locked --all-extras ruff check .
+      - name: Test
+        run: uv run --locked --all-extras pytest -q
+      - name: Build Python distribution
+        run: uv run --locked --all-extras python -m build
+      - name: Install Bicep CLI
+        run: |
+          curl --fail --location --silent --show-error https://github.com/Azure/bicep/releases/download/v0.48.1/bicep-linux-x64 --output /tmp/bicep
+          chmod +x /tmp/bicep
+      - name: Compile Bicep templates
+        run: /tmp/bicep build infra/main.bicep --stdout > /dev/null
+
+  container-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build --platform linux/amd64 -f Dockerfile.api -t ptu-batch-api:ci .
+      - name: Build control image
+        run: docker build --platform linux/amd64 -f Dockerfile.control -t ptu-batch-control:ci .
+      - name: Build inference image
+        run: docker build --platform linux/amd64 -f Dockerfile.inference -t ptu-batch-inference:ci .
+      - name: Verify installed CLI and Functions metadata
+        run: |
+          docker run --rm --platform linux/amd64 --entrypoint ptu-batch ptu-batch-control:ci --help
+          docker run --rm --platform linux/amd64 --workdir /home/site/wwwroot --entrypoint python ptu-batch-control:ci -c "import function_app; assert len(function_app.app.get_functions()) == 3"
+          docker run --rm --platform linux/amd64 --workdir /home/site/wwwroot --entrypoint python ptu-batch-inference:ci -c "import function_app; assert len(function_app.app.get_functions()) == 1"
+
+  terraform-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.7
+      - name: Check Terraform format
+        run: terraform -chdir=infra/terraform fmt -check -recursive
+      - name: Initialize providers without a deployment backend
+        run: terraform -chdir=infra/terraform init -backend=false -lockfile=readonly
+      - name: Validate Terraform
+        run: terraform -chdir=infra/terraform validate
+      - name: Test native architecture with mocked providers
+        run: terraform -chdir=infra/terraform test
+      - name: Install verified Trivy binary
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/ptu-trivy"
+          cd "$RUNNER_TEMP/ptu-trivy"
+          curl --fail --location --silent --show-error https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-64bit.tar.gz --output trivy_0.76.1_Linux-64bit.tar.gz
+          curl --fail --location --silent --show-error https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_checksums.txt --output checksums.txt
+          grep ' trivy_0.76.1_Linux-64bit.tar.gz$' checksums.txt | sha256sum --check
+          tar -xzf trivy_0.76.1_Linux-64bit.tar.gz trivy
+      - name: Scan Terraform configuration
+        run: '"$RUNNER_TEMP/ptu-trivy/trivy" config --disable-telemetry --skip-version-check --exit-code 1 infra/terraform'
+      - name: Scan source for secrets
+        run: '"$RUNNER_TEMP/ptu-trivy/trivy" fs --scanners secret --disable-telemetry --skip-version-check --exit-code 1 --skip-dirs .git --skip-dirs infra/terraform/.terraform --skip-dirs dist .'

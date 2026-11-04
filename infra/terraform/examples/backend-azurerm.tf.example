@@ -1,0 +1,5 @@
+# Copy to ../backend_override.tf before initializing a new remote-state environment.
+# For an existing state, follow the explicit migration procedure in the guide.
+terraform {
+  backend "azurerm" {}
+}

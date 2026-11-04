@@ -1,0 +1,46 @@
+name: azure-ptu-batch-accelerator
+metadata:
+  template: azure-ptu-batch-accelerator@0.1.0
+infra:
+  provider: bicep
+  path: infra
+  module: main
+hooks:
+  preprovision:
+    posix:
+      shell: sh
+      run: ./scripts/guard-inference-deploy.sh --provision
+  predeploy:
+    posix:
+      shell: sh
+      run: ./scripts/guard-inference-deploy.sh --predeploy
+services:
+  api:
+    project: .
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile.api
+      context: .
+      platform: linux/amd64
+  control:
+    project: .
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile.control
+      context: .
+      platform: linux/amd64
+  inference:
+    project: .
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile.inference
+      context: .
+      platform: linux/amd64
+    hooks:
+      predeploy:
+        posix:
+          shell: sh
+          run: ./scripts/guard-inference-deploy.sh --inference-deploy
