@@ -4,20 +4,22 @@ An open-source, OpenAI Files/Batch-compatible API for running asynchronous JSONL
 
 > This is a reference accelerator, not Azure OpenAI native Batch. It has no Azure OpenAI Batch portal integration, native Batch pricing or SLA, guaranteed 24-hour completion, or automatic capacity scheduling. You pay for the PTU deployment and the accelerator's Azure resources. Review [limits and operations](docs/operations.md) before production use.
 
-```mermaid
-flowchart LR
-  client[OpenAI SDK / HTTP client] --> api[API Container App<br/>FastAPI :8000]
-  api --> blob[(Blob files)]
-  api --> ledger[(Cosmos DB ledger)]
-  ledger --> relay[Cosmos change feed / outbox relay]
-  relay --> controlQ[Service Bus control queue]
-  controlQ --> control[Control Functions<br/>internal :80]
-  control --> inferenceQ[Service Bus inference queue]
-  inferenceQ --> worker[Inference Functions<br/>internal :80; max 1 replica]
-  worker --> aoai[Existing Azure OpenAI PTU deployment]
-  worker --> ledger
-  worker --> blob
-```
+## Architecture
+
+The accelerator keeps the OpenAI SDK's Files and Batch workflow while processing requests on the customer's existing Azure OpenAI PTU deployment.
+
+![Azure PTU Batch Accelerator asynchronous job flow](docs/architecture/azure-ptu-batch-workflow.png)
+
+[View job flow at full size](docs/architecture/azure-ptu-batch-workflow.png) · [Download editable Draw.io diagram](docs/architecture/azure-ptu-batch-architecture.drawio) · [Download architecture PDF](docs/architecture/azure-ptu-batch-architecture.pdf)
+
+<details>
+<summary>Deployment and security topology</summary>
+
+![Azure PTU Batch Accelerator deployment and security topology](docs/architecture/azure-ptu-batch-deployment.png)
+
+[View deployment and security diagram at full size](docs/architecture/azure-ptu-batch-deployment.png)
+
+</details>
 
 All three apps share one Azure Container Apps Consumption environment. Control and inference use native Azure Functions container apps (`kind: functionapp`), not Durable Functions or sandbox containers. The API is a regular FastAPI container app. A user-assigned managed identity reaches Storage, Service Bus, Cosmos DB, Azure Monitor, ACR, and the existing Azure OpenAI account. The customer owns the Entra API registration and caller grants.
 
