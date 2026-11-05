@@ -23,6 +23,12 @@ The accelerator keeps the OpenAI SDK's Files and Batch workflow while processing
 
 All three apps share one Azure Container Apps Consumption environment. Control and inference use native Azure Functions container apps (`kind: functionapp`), not Durable Functions or sandbox containers. The API is a regular FastAPI container app. A user-assigned managed identity reaches Storage, Service Bus, Cosmos DB, Azure Monitor, ACR, and the existing Azure OpenAI account. The customer owns the Entra API registration and caller grants.
 
+## Jupyter showcase
+
+Open the [presenter notebook](examples/ptu_batch_demo.ipynb) in VS Code/JupyterLab and select a Python 3.12 kernel. Install [notebook requirements](examples/requirements-notebook.txt), configure the accelerator URL, tenant, and API application ID, and sign in with Azure CLI.
+
+Part A demonstrates live Entra authentication, Files upload/retrieve/download, batch listing, and paused admission. Part B contains the full PTU upload → submit → poll → output workflow and remains disabled until a real PTU is configured and admission is resumed. The notebook embeds the architecture diagram, uses generic support-ticket data, and never prints bearer tokens or substitutes synthetic model results.
+
 ## Local quickstart
 
 Requires Python 3.12 and [uv](https://docs.astral.sh/uv/). The local mode uses in-memory state and an echo inference path. It makes no Azure calls and **is not durable**.

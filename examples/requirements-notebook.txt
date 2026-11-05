@@ -1,0 +1,6 @@
+# Presenter notebook: Python 3.12
+openai==3.42.1
+azure-identity==1.27.0
+httpx==0.28.1
+ipykernel>=6.29,<8
+jupyterlab>=4,<5
