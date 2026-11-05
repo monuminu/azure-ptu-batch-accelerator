@@ -1,5 +1,26 @@
 # Verification report — 0.1.0
 
+## JSONL deployment routing — 5 November 2026
+
+The account-only configuration was deployed with the native Terraform wrapper to an existing Global Provisioned gpt-4.1-mini target. New jobs select the actual deployment name from JSONL `body.model`; none of the three apps has a deployment-alias environment map. The operator account identity, managed-identity role scopes and caller restriction were retained.
+
+| Check | Result |
+| --- | --- |
+| Automated Python suite | **282 passed** |
+| Native Terraform architecture tests | **14 passed**, mocked providers |
+| Ruff, Python distribution build, Bicep compilation and secret/IaC scans | Passed |
+| Live SDK Chat Completions | User-supplied three-question file: **3 completed, 0 failures**, actual deployment name in every row |
+| Live SDK stateless Responses | **1 completed, 0 failures**, including the tutorial's advisory `/chat/completions` batch endpoint |
+| Standard deployment and nonexistent name | Both batches became **failed** during validation, with `batch.errors` pointing to `body.model` and no completed inference requests |
+| Personal showcase notebook | **16 code cells**, no errors, **32.6 seconds**; uploads an existing `chat.jsonl` unchanged |
+| Safe upgrade | Paused/settled gate, zero queued work/old inference replicas, then new healthy API and native Functions revisions; admission resumed after managed-identity preflight |
+| Post-apply Terraform plan | **0 additions, 0 updates, 0 deletions** |
+| GitHub CI for routing implementation | [All three jobs passed](https://github.com/monuminu/azure-ptu-batch-accelerator/actions/runs/42026042773) |
+
+The four focused live acceptance requests reported **102 input tokens and 139 output tokens (241 total)**. The notebook performed three additional small demonstration requests; those are not included in that four-request token total. This is a functional acceptance run, not a sustained throughput/cost benchmark or a 1 TB inference test. The tests do not establish avoided Batch spend or actual Azure billing totals. Existing ARM preflight caching and controlled-upgrade requirements are documented in the [routing guide](deployment-name-routing.md).
+
+## Initial platform validation — 4 November 2026
+
 Verified locally and in a customer-owned Azure subscription on 4 November 2026. Native Terraform provisioned the platform and deployed all three applications. No existing PTU deployment was available, so Azure acceptance used explicit **validation-only mode** with a read-only Standard reference. The runtime PTU guard stayed enabled, no role was granted on the reference account, and no model inference was invoked. Submission admission was left paused.
 
 ## Completed checks
@@ -72,8 +93,8 @@ bicep build infra/main.bicep
 
 See the [Terraform guide](terraform-deployment.md) for private saved-plan review/apply, remote state, controlled platform-only validation, and rollback. Image builds used the optional trusted package-index override because the local network blocked public wheel downloads; the checked-in default and dependency lock remain public PyPI. Docker authentication used a temporary private configuration.
 
-## Azure acceptance still required with a real PTU
+## Remaining acceptance beyond the initial platform run
 
-Real PTU inference, model/API capability, multimodal and structured outputs against that model, sustained effective concurrency, worker failure after remote dispatch, active-inference upgrades, long-running retention/24-hour continuation, and throughput/cost savings still require a configured PTU. The 100,000-request limit was exercised locally, not as a real Azure inference load test. Private-only PTUs also require the customer's existing DNS/routing connectivity.
+The 5 November checks above establish real text PTU inference for Chat Completions and stateless Responses. Multimodal and structured outputs against the selected model, sustained effective concurrency, worker failure after remote dispatch, upgrades with active inference, long-running retention/24-hour continuation, and throughput/cost savings still need dedicated Azure acceptance. The 100,000-request limit was exercised locally, not as a real Azure inference load test. Private-only PTUs also require the customer's existing DNS/routing connectivity.
 
-Completed model token volume during this validation was **0**. No avoided Batch spend is claimed. The deployed support resources continue to incur Azure costs; compare completed token usage with operator-supplied native Batch comparison rates and actual Azure infrastructure charges. Billing totals were not established by this short platform-only run.
+Completed model token volume during the initial **platform-only** validation was **0**. No avoided Batch spend is claimed. The deployed support resources continue to incur Azure costs; compare completed token usage with operator-supplied native Batch comparison rates and actual Azure infrastructure charges. Billing totals were not established by this short platform-only run.
