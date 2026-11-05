@@ -11,7 +11,7 @@ resource "azuread_application" "api" {
   lifecycle {
     # These three fields are owned by the granular resources below. The parent
     # still manages API token version 2 and its other declared properties.
-    ignore_changes = [identifier_uris, app_role, api[0].oauth2_permission_scope]
+    ignore_changes = [identifier_uris, app_role, api[0].oauth2_permission_scope, service_management_reference]
   }
   depends_on = [terraform_data.contract]
 }

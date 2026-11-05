@@ -29,6 +29,8 @@ Open the [presenter notebook](examples/ptu_batch_demo.ipynb) in VS Code/JupyterL
 
 Part A demonstrates live Entra authentication, Files upload/retrieve/download, batch listing, and paused admission. Part B contains the full PTU upload → submit → poll → output workflow and remains disabled until a real PTU is configured and admission is resumed. The notebook embeds the architecture diagram, uses generic support-ticket data, and never prints bearer tokens or substitutes synthetic model results.
 
+For a configured Global Provisioned deployment, use the [Global PTU showcase notebook](examples/global_ptu_demo.ipynb). Its shared version keeps real submissions off until the operator checks the target and enables the run switch. See the [Global PTU demo operating guide](docs/global-ptu-demo.md) for preflight, admission, and hourly-billing considerations.
+
 ## Local quickstart
 
 Requires Python 3.12 and [uv](https://docs.astral.sh/uv/). The local mode uses in-memory state and an echo inference path. It makes no Azure calls and **is not durable**.

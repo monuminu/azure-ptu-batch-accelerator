@@ -30,7 +30,7 @@ The apply graph creates a Basic ACR, grants the deployer AcrPush by default, bui
 
 The three storage accounts use native AzAPI control-plane resources with shared-key access disabled from creation. This avoids AzureRM storage-account creation polling through the key-authenticated data plane. The runtime payload Blob URL is built from the stable account name and the Azure public-cloud DNS suffix (`blob.core.windows.net`), so a storage policy update does not force an unrelated app revision. This module currently targets Azure public cloud. For a state created with the earlier AzureRM storage resources, back up state and migrate only those three addresses to the existing AzAPI resource IDs before retrying; this module does not remove state entries or import resources automatically.
 
-The native apps use Azure's canonical `Auto` ingress transport value. The parent Entra application continues to manage access-token version 2; its identifier URI, delegated scope, and application role are owned by separate Terraform resources, with only those three parent fields ignored for drift.
+The native apps use Azure's canonical `Auto` ingress transport value. The parent Entra application continues to manage access-token version 2; its identifier URI, delegated scope, and application role are owned by separate Terraform resources, with those three parent fields ignored for drift. Azure-generated service-management references are also preserved rather than cleared by unrelated deployments.
 
 Set `cosmos_location` to place only Cosmos DB in another supported region; when null it follows `location`. The resource group, Container Apps, registry, storage, and monitoring retain `location`.
 
