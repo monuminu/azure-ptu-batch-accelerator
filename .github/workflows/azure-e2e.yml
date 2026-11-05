@@ -8,6 +8,9 @@ on:
       app_id:
         description: Accelerator API app/client ID
         required: true
+      deployment_name:
+        description: Actual Azure PTU deployment name for the sample JSONL
+        required: true
       kind:
         type: choice
         options: [chat, responses]
@@ -43,4 +46,5 @@ jobs:
           BASE_URL: ${{ inputs.base_url }}
           APP_ID: ${{ inputs.app_id }}
           KIND: ${{ inputs.kind }}
-        run: uv run --locked --all-extras python scripts/smoke_test.py --base-url "$BASE_URL" --app-id "$APP_ID" --kind "$KIND" --create-job
+          DEPLOYMENT_NAME: ${{ inputs.deployment_name }}
+        run: uv run --locked --all-extras python scripts/smoke_test.py --base-url "$BASE_URL" --app-id "$APP_ID" --kind "$KIND" --deployment-name "$DEPLOYMENT_NAME" --create-job

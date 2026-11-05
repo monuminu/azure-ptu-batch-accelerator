@@ -17,8 +17,9 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
-from .errors import BatchError
+from .errors import BatchError, DeploymentPreflightError
 from .ports import BlobInfo, Conflict, Mutation
+from .settings import DeploymentAccount
 
 log = logging.getLogger(__name__)
 TERMINAL = {"completed", "failed", "cancelled", "expired"}
@@ -462,6 +463,11 @@ class Engine:
                     "deployment_snapshot": {
                         k: v.model_dump() for k, v in self.rt.settings.deployments.items()
                     },
+                    "deployment_account_snapshot": (
+                        self.rt.settings.deployment_account.model_dump()
+                        if self.rt.settings.deployment_account is not None
+                        else None
+                    ),
                     "validation_complete": False,
                     "dispatch_complete": False,
                     "output_expires_after": body.get("output_expires_after"),
@@ -919,13 +925,24 @@ class Engine:
         endpoint = canonical_endpoint(row.get("url"))
         body = row.get("body")
         if not isinstance(body, dict) or not isinstance(body.get("model"), str):
-            raise BatchError(400, "Request body requires a deployment alias", param="body.model")
+            raise BatchError(400, "Request body requires a deployment name", param="body.model")
         alias = body["model"]
-        target = job["deployment_snapshot"].get(alias)
-        if not target:
-            raise BatchError(
-                400, "Deployment alias is not configured", "model_not_found", "body.model"
-            )
+        account_snapshot = job.get("deployment_account_snapshot")
+        if account_snapshot is not None:
+            try:
+                target = (
+                    DeploymentAccount.model_validate(account_snapshot).resolve(alias).model_dump()
+                )
+            except ValueError as exc:
+                raise BatchError(
+                    400, "Invalid deployment name or account configuration", param="body.model"
+                ) from exc
+        else:
+            target = job["deployment_snapshot"].get(alias)
+            if not target:
+                raise BatchError(
+                    400, "Deployment alias is not configured", "model_not_found", "body.model"
+                )
         if (
             target.get("allowed_subjects")
             and job["principal"]["subject_id"] not in target["allowed_subjects"]
@@ -935,6 +952,8 @@ class Engine:
             )
         if endpoint not in target["allowed_apis"]:
             raise BatchError(400, "Deployment does not allow this API", param="url")
+        if account_snapshot is not None:
+            target["allowed_apis"] = [endpoint]
         if expected and expected != (endpoint, alias):
             raise BatchError(
                 400, "All lines must use one endpoint and deployment", param="body.model"
@@ -1044,6 +1063,10 @@ class Engine:
                 await self._finalize(id)
             else:
                 await self._dispatch_staged(id)
+        except DeploymentPreflightError as exc:
+            await self._fail_validation(
+                id, token, BatchError(400, str(exc), exc.code, "body.model"), number
+            )
         except BatchError as exc:
             await self._fail_validation(id, token, exc, number)
         except Conflict:

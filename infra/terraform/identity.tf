@@ -149,6 +149,8 @@ resource "azurerm_role_assignment" "builder_acr_push" {
 }
 
 resource "azurerm_role_assignment" "existing_ptu" {
+  # Keep the existing role addresses while account-only routing changes the
+  # scope source from a deployment-derived account ID to the account input.
   for_each = var.assign_runtime_ptu_roles && !var.validation_only ? {
     openai_user = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
     reader      = "acdd72a7-3385-48ef-bd42-f606fba81ae7"

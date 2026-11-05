@@ -150,8 +150,16 @@ def test_azure_smoke_logic_waits_for_and_verifies_real_sdk_results(local_server)
     ) as client:
         for kind in ("chat", "responses"):
             result = module.run_smoke(
-                client, repo / "examples" / f"{kind}.jsonl", timeout_seconds=15, poll_interval=0.1
+                client,
+                repo / "examples" / f"local-{kind}.jsonl",
+                timeout_seconds=15,
+                poll_interval=0.1,
             )
             assert result["status"] == "completed"
             assert result["completed"] >= 1 and result["failed"] == 0
             assert result["output_file_id"]
+            submitted = client.batches.retrieve(result["batch_id"])
+            assert (
+                client.files.content(submitted.input_file_id).read()
+                == (repo / "examples" / f"local-{kind}.jsonl").read_bytes()
+            )

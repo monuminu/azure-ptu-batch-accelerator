@@ -4,11 +4,19 @@ The native template in `infra/terraform` uses AzureRM for supporting resources a
 
 ## Prerequisites and values
 
-Use Terraform **1.15.x** (tested with **1.15.7**), Azure CLI signed into the target tenant, Docker with Linux AMD64 build support, and Python 3.12. The committed provider lock uses AzureRM 4.81.0, AzAPI 2.13.0, AzureAD 3.10.0, and Random 3.9.1. The deployer needs resource creation and role-assignment rights in the target subscription, AcrPush, read access to the existing model deployment, and permissions for any optional Entra registration/preauthorization. An existing accelerator `api_app_id` can be supplied instead of creating one.
+Use Terraform **1.15.x** (tested with **1.15.7**), Azure CLI signed into the target tenant, Docker with Linux AMD64 build support, and Python 3.12. The committed provider lock uses AzureRM 4.81.0, AzAPI 2.13.0, AzureAD 3.10.0, and Random 3.9.1. The deployer needs resource creation and role-assignment rights in the target subscription, AcrPush, read access to the existing Azure OpenAI account, and permissions for any optional Entra registration/preauthorization. An existing accelerator `api_app_id` can be supplied instead of creating one.
 
-Copy `infra/terraform/variables.example.json` to a **private location outside this repository** and fill its JSON variables for the wrapper. Set explicit `subscription_id` and `tenant_id`, the existing PTU deployment ID/account endpoint/name, and a short environment name. Use `api_app_id` if your administrator already registered the API. Optional Azure CLI preauthorization is disabled by default; enable it only when that client should be allowed to request the API's delegated scope.
+Copy `infra/terraform/variables.example.json` to a **private location outside this repository** and fill its JSON variables for the wrapper. Set explicit `subscription_id` and `tenant_id`, the existing `openai_account_resource_id` and `openai_resource_endpoint`, and a short environment name. No deployment name or alias is required in the primary account mode: the user supplies the actual deployment name in each JSONL `body.model`. Use `api_app_id` if your administrator already registered the API. Optional Azure CLI preauthorization is disabled by default; enable it only when that client should be allowed to request the API's delegated scope.
 
 Delegated callers receive `Batch.ReadWrite`. Application callers receive the distinct `Batch.ReadWrite.Application` role. Both use `api://<api-app-id>/.default` when obtaining tokens; the original legacy application role remains accepted for existing registrations. No application password is created.
+
+## Account configuration and runtime deployment selection
+
+Primary account mode requires only `openai_account_resource_id` (an account ARM ID ending in `/accounts/<name>`) and its matching HTTPS `openai_resource_endpoint`. Terraform checks that the account exists and is ready, and grants the runtime scoped Reader and OpenAI User access. It does not enumerate or register deployment aliases and does not create/change model deployments.
+
+The JSONL `body.model` is the actual deployment name. The service snapshots the trusted account at batch acceptance, resolves a literal name during whole-file validation, and performs strict deployment-level PTU, capacity, state, API and spillover checks before dispatch. One file must use one deployment and normalized endpoint. The resolved endpoint/deployment target is committed in the job; subsequent account-config changes cannot redirect an accepted job.
+
+The original `ptu_deployment_resource_id`/`ptu_resource_endpoint`/`ptu_deployment_name`/`ptu_alias` inputs remain a compatibility path. Omit those fields when using the account inputs. `validation_only` belongs to the legacy known-deployment platform-validation path; it is not needed for account mode.
 
 ## Network topology
 
@@ -18,7 +26,7 @@ Terraform defaults to `private_networking=true`: a delegated Container Apps subn
 
 ## Private plan and apply
 
-Use the wrapper for **every** apply and retry, including updates. First create a private plan. Review the plan summary and the full plan locally, then apply that exact artifact. The wrapper records digests of the plan, source, variables, and backend configuration in a private manifest. It rejects changed inputs and runs a fresh read-only model check and durable drain guard before apply, even when Terraform's guard resource has no changed fingerprint.
+Use the wrapper for **every** apply and retry, including updates. First create a private plan. Review the plan summary and the full plan locally, then apply that exact artifact. The wrapper records digests of the plan, source, variables, and backend configuration in a private manifest. It rejects changed inputs and runs a fresh read-only account/deployment check and durable drain guard before apply, even when Terraform's guard resource has no changed fingerprint.
 
 ```bash
 python3 scripts/terraform_deploy.py \
@@ -73,7 +81,7 @@ On an existing deployment, pause batch admission through the control app and wai
 
 ## Validate infrastructure when no PTU is available
 
-Production mode rejects Standard deployments before creating infrastructure. For an explicit **platform-only validation**, set `validation_only=true` in the private JSON and pass `--validation-only` to both plan and apply-plan wrapper invocations. The existing reference deployment must still be readable, succeeded, and have no spillover.
+In legacy known-deployment mode, production rejects Standard deployments before infrastructure creation. In primary account mode, each submitted JSONL deployment is checked at runtime before model calls. For an explicit legacy **platform-only validation**, set `validation_only=true` in the private JSON and pass `--validation-only` to both plan and apply-plan wrapper invocations. The existing reference deployment must still be readable, succeeded, and have no spillover.
 
 This mode keeps the application's Azure backend configuration and PTU-only runtime guard intact. It does not create PTUs, grant access to the Standard account, enable Standard inference, or switch to synthetic inference. Keep customer admission paused. Health, authentication, Files operations, and a malformed-input asynchronous job can verify the deployed platform without a model call. For that controlled validation test, use a single JSONL row with `method="GET"`, briefly resume to submit it, and immediately pause again before polling. Confirm its validation error identifies `method`; do not submit valid inference input. A notification referring to that terminal job can exercise the inference trigger without dispatching a request. Real PTU execution remains unverified until a valid provisioned target is configured and `validation_only` is disabled.
 

@@ -57,26 +57,64 @@ variable "environment_name" {
 }
 
 variable "ptu_deployment_resource_id" {
-  description = "Full ARM ID of an EXISTING Azure OpenAI PTU deployment. Terraform does not create or alter it."
+  description = "Legacy mode: full ARM ID of an EXISTING Azure OpenAI deployment. Omit for JSONL model routing."
   type        = string
+  default     = null
+  nullable    = true
   validation {
-    condition     = can(regex("^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.CognitiveServices/accounts/[^/]+/deployments/[^/]+$", var.ptu_deployment_resource_id))
+    condition     = var.ptu_deployment_resource_id == null || can(regex("^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.CognitiveServices/accounts/[^/]+/deployments/[^/]+$", var.ptu_deployment_resource_id))
     error_message = "Provide a full Microsoft.CognitiveServices/accounts/.../deployments/... resource ID."
   }
 }
 
 variable "ptu_resource_endpoint" {
-  description = "HTTPS endpoint of the existing Azure OpenAI account."
+  description = "Legacy mode: HTTPS endpoint of the existing Azure OpenAI account. Omit for JSONL model routing."
   type        = string
+  default     = null
+  nullable    = true
   validation {
-    condition     = can(regex("^https://[^/]+/?$", var.ptu_resource_endpoint))
+    condition     = var.ptu_resource_endpoint == null || can(regex("^https://[^/]+/?$", var.ptu_resource_endpoint))
     error_message = "Provide the account's HTTPS origin, without a path."
   }
 }
 
 variable "ptu_deployment_name" {
-  description = "Name of the existing PTU deployment (must match the resource ID)."
+  description = "Legacy mode: name of the existing PTU deployment (must match its resource ID). Omit for JSONL model routing."
   type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "openai_account_resource_id" {
+  description = "JSONL model routing: full ARM ID of an EXISTING Azure OpenAI account. Terraform does not create or alter the account or its deployments."
+  type        = string
+  default     = null
+  nullable    = true
+  validation {
+    condition     = var.openai_account_resource_id == null || can(regex("^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.CognitiveServices/accounts/[^/]+$", var.openai_account_resource_id))
+    error_message = "Provide an existing Microsoft.CognitiveServices/accounts/... ARM ID without a deployment segment."
+  }
+  validation {
+    condition = (
+      var.openai_account_resource_id != null && var.openai_resource_endpoint != null &&
+      var.ptu_deployment_resource_id == null && var.ptu_deployment_name == null && var.ptu_resource_endpoint == null
+      ) || (
+      var.openai_account_resource_id == null && var.openai_resource_endpoint == null &&
+      var.ptu_deployment_resource_id != null && var.ptu_deployment_name != null && var.ptu_resource_endpoint != null
+    )
+    error_message = "Specify either the account ID and endpoint for JSONL model routing or all three legacy deployment fields; do not mix or omit them."
+  }
+}
+
+variable "openai_resource_endpoint" {
+  description = "JSONL model routing: HTTPS origin returned by the existing Azure OpenAI account."
+  type        = string
+  default     = null
+  nullable    = true
+  validation {
+    condition     = var.openai_resource_endpoint == null || can(regex("^https://[A-Za-z0-9][A-Za-z0-9.-]*/?$", var.openai_resource_endpoint))
+    error_message = "Provide the account's plain HTTPS origin without credentials, path, query, or fragment."
+  }
 }
 
 variable "ptu_alias" {

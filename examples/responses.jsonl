@@ -1,1 +1,1 @@
-{"custom_id":"responses-1","method":"POST","url":"/v1/responses","body":{"model":"ptu","input":"Write one sentence describing a queue-backed batch worker.","max_output_tokens":80}}
+{"custom_id": "responses-1", "method": "POST", "url": "/v1/responses", "body": {"model": "REPLACE-WITH-MODEL-DEPLOYMENT-NAME", "input": "Write one sentence describing a queue-backed batch worker.", "max_output_tokens": 80}}

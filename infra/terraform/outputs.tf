@@ -56,6 +56,21 @@ output "ptu_alias" {
   value = var.ptu_alias
 }
 
+output "openai_account_resource_id" {
+  description = "Read-only ARM ID of the existing Azure OpenAI account used by the runtime."
+  value       = local.ptu_account_id
+}
+
+output "openai_resource_endpoint" {
+  description = "Verified origin of the existing Azure OpenAI account."
+  value       = local.effective_endpoint
+}
+
+output "deployment_resolution" {
+  description = "jsonl_model resolves each JSONL model value at runtime; legacy_alias uses the configured deployment alias."
+  value       = local.account_mode ? "jsonl_model" : "legacy_alias"
+}
+
 output "validation_only" {
   description = "True means a non-PTU deployment was allowed for infrastructure/API/auth validation."
   value       = var.validation_only

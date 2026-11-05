@@ -211,7 +211,7 @@
         <mxCell id="ptu-sub" value="&lt;div&gt;Customer capacity already purchased&lt;/div&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;fillColor=none;strokeColor=none;fontFamily=Arial;fontSize=12;fontColor=#61778A;align=center;verticalAlign=middle;spacing=0;" parent="ptu" vertex="1">
           <mxGeometry x="12" y="116" width="216" height="24" as="geometry"/>
         </mxCell>
-        <mxCell id="ptu-body" value="&lt;div&gt;Configured deployment alias&lt;br&gt;Chat Completions / Responses&lt;br&gt;Ordinary inference API&lt;/div&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;fillColor=none;strokeColor=none;fontFamily=Arial;fontSize=14;fontColor=#12304A;align=center;verticalAlign=middle;spacing=0;" parent="ptu" vertex="1">
+        <mxCell id="ptu-body" value="&lt;div&gt;Deployment name from JSONL&lt;br&gt;Chat Completions / Responses&lt;br&gt;Ordinary inference API&lt;/div&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;fillColor=none;strokeColor=none;fontFamily=Arial;fontSize=14;fontColor=#12304A;align=center;verticalAlign=middle;spacing=0;" parent="ptu" vertex="1">
           <mxGeometry x="12" y="144" width="216" height="52" as="geometry"/>
         </mxCell>
         <mxCell id="ptu-badge" value="&lt;div&gt;Customer-managed PTU capacity&lt;/div&gt;" style="text;html=1;whiteSpace=wrap;overflow=hidden;rounded=0;fillColor=none;strokeColor=none;fontFamily=Arial;fontSize=11;fontColor=#238658;align=center;verticalAlign=middle;spacing=0;fontStyle=1;" parent="ptu" vertex="1">

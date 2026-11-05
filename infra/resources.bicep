@@ -4,6 +4,7 @@ param environmentName string
 param location string
 param tenantId string
 param acceleratorAppId string
+param ptuAccountResourceId string
 param ptuDeploymentResourceId string
 param ptuResourceEndpoint string
 param ptuDeploymentName string
@@ -25,6 +26,17 @@ var deployments = {
     allowed_subjects: allowedSubjects
   }
 }
+var deploymentAccount = {
+  resource_endpoint: ptuResourceEndpoint
+  resource_id: ptuAccountResourceId
+  allowed_apis: allowedApis
+  allowed_subjects: allowedSubjects
+}
+var routingEnv = !empty(ptuAccountResourceId) ? [
+  { name: 'PTU_BATCH_DEPLOYMENT_ACCOUNT', value: string(deploymentAccount) }
+] : [
+  { name: 'PTU_BATCH_DEPLOYMENTS', value: string(deployments) }
+]
 var appName = 'ca-${environmentName}-ptu-api'
 var controlName = 'ca-${environmentName}-ptu-control'
 var inferenceName = 'ca-${environmentName}-ptu-inference'
@@ -316,13 +328,12 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-var commonEnv = [
+var commonEnv = concat([
   { name: 'PTU_BATCH_MODE', value: 'azure' }
   { name: 'PTU_BATCH_TENANT_ID', value: tenantId }
   { name: 'PTU_BATCH_AUDIENCE', value: acceleratorAppId }
   { name: 'PTU_BATCH_REQUIRED_PERMISSION', value: 'Batch.ReadWrite' }
   { name: 'PTU_BATCH_APPLICATION_ROLE', value: 'Batch.ReadWrite.Application' }
-  { name: 'PTU_BATCH_DEPLOYMENTS', value: string(deployments) }
   { name: 'PTU_BATCH_COSMOS_ENDPOINT', value: cosmos.properties.documentEndpoint }
   { name: 'PTU_BATCH_COSMOS_DATABASE', value: 'ptu-batch' }
   { name: 'PTU_BATCH_COSMOS_CONTAINER', value: 'ledger' }
@@ -338,7 +349,7 @@ var commonEnv = [
   { name: 'PTU_BATCH_REQUEST_LEASE_SECONDS', value: '660' }
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: insights.properties.ConnectionString }
   { name: 'APPLICATIONINSIGHTS_AUTHENTICATION_STRING', value: 'Authorization=AAD;ClientId=${identity.properties.clientId}' }
-]
+], routingEnv)
 
 var functionEnv = [
   { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }

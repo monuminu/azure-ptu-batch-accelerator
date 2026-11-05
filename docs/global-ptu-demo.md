@@ -6,13 +6,13 @@ The accelerator's default runtime accepts Regional, Data Zone, and Global provis
 
 Use an existing provisioned deployment whenever possible. If the operator creates a short-lived demo deployment, first verify the live model catalog, minimum/step, subscription quota, regional capacity, deployment permissions, and current PTU-hour price. The demo workflow does not purchase reservations or configure Standard spillover automatically. The accelerator Terraform stack still does not create or modify the model deployment itself.
 
-Update the private accelerator deployment ID/account endpoint/name to the provisioned target and set `validation_only=false`. Pause submission admission, review the saved Terraform plan, and apply it through the durable drain guard. Grant its managed identity Cognitive Services OpenAI User and Reader at the existing account scope through the template's scoped role assignments. Keep file/job ownership and the caller allowlist intact.
+Configure the private accelerator variables with the existing account ID and matching endpoint (`openai_account_resource_id` and `openai_resource_endpoint` in Terraform). No deployment name or alias is required there. Supply the actual PTU deployment name in JSONL `body.model`; each file uses one deployment. Pause submission admission, review the saved Terraform plan, and apply it through the durable drain guard. Grant its managed identity Cognitive Services OpenAI User and Reader at the existing account scope through the template's scoped role assignments. Keep file/job ownership and the caller allowlist intact.
 
-Before regular submissions, run `ptu-batch preflight` inside the configured control app and verify success using its managed identity. For an operator CLI process with a user-assigned identity, set `AZURE_CLIENT_ID` to that identity client ID before invoking the command. The deployed runtime passes its managed identity client ID explicitly. Confirm the model supports the chosen Chat Completions or stateless Responses API and has no Standard spillover. Then explicitly resume admission.
+Before regular submissions, run `ptu-batch preflight --deployment <actual-ptu-name>` inside the configured control app and verify success using its managed identity. The CLI passes the configured managed identity client ID explicitly. Account-only `ptu-batch preflight` verifies connectivity and account readiness; it reports `ptu_eligibility_checked=false` because the deployment is selected later from JSONL. Confirm the model supports the chosen Chat Completions or stateless Responses API and has no Standard spillover. Then explicitly resume admission.
 
 ## Run the notebook
 
-Open [global_ptu_demo.ipynb](../examples/global_ptu_demo.ipynb), set the accelerator URL, tenant and API application ID, sign in with a consented identity, and use a Python 3.12 kernel. After the operator has completed target/preflight/admission checks, set:
+Open [global_ptu_demo.ipynb](../examples/global_ptu_demo.ipynb), set the accelerator URL, tenant and API application ID, sign in with a consented identity, and use a Python 3.12 kernel. Edit `body.model` in the sample or set `INPUT_JSONL_PATH` to an existing file, which will be uploaded unchanged. After the operator has completed target/preflight/admission checks, set:
 
 ```python
 ENVIRONMENT_IS_VALIDATION_ONLY = False

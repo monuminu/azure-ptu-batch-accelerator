@@ -36,6 +36,24 @@ def deployment_configuration(settings, values):
     }
 
 
+def account_configuration(settings, values):
+    """Use account routing when configured, including values loaded from azd."""
+    if account := getattr(settings, "deployment_account", None):
+        return account
+    if raw := values.get("PTU_BATCH_DEPLOYMENT_ACCOUNT"):
+        from .settings import DeploymentAccount
+
+        return DeploymentAccount.model_validate(json.loads(raw))
+    if resource_id := values.get("PTU_BATCH_PTU_ACCOUNT_RESOURCE_ID"):
+        from .settings import DeploymentAccount
+
+        return DeploymentAccount(
+            resource_id=resource_id,
+            resource_endpoint=values.get("PTU_BATCH_PTU_RESOURCE_ENDPOINT", ""),
+        )
+    return None
+
+
 def usage_report(jobs, *, input_rate=None, output_rate=None, infrastructure_cost=None):
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     counts = {"completed": 0, "failed": 0}
@@ -73,18 +91,35 @@ async def _preflight(args):
 
     from .adapters.preflight import AzurePreflight
 
-    settings = Settings()
+    # Explicit targets must remain usable even when unrelated stored routing JSON is stale.
+    settings = (
+        Settings.model_construct(deployments={}, deployment_account=None)
+        if args.resource_id
+        else Settings()
+    )
     values = dict(os.environ)
     if args.resource_id:
+        # An explicit target must override both configured routing formats.
+        values.pop("PTU_BATCH_DEPLOYMENTS", None)
+        values.pop("PTU_BATCH_DEPLOYMENT_ACCOUNT", None)
+        values.pop("PTU_BATCH_PTU_ACCOUNT_RESOURCE_ID", None)
+        settings.deployments = {}
+        settings.deployment_account = None
         values.update(
             PTU_BATCH_PTU_DEPLOYMENT_RESOURCE_ID=args.resource_id,
             PTU_BATCH_PTU_RESOURCE_ENDPOINT=args.endpoint or "",
             PTU_BATCH_PTU_DEPLOYMENT_NAME=args.deployment or "",
             PTU_BATCH_PTU_ALIAS=args.alias,
         )
-        settings.deployments = {}
+        if "/deployments/" not in args.resource_id.casefold():
+            from .settings import DeploymentAccount
+
+            settings.deployment_account = DeploymentAccount(
+                resource_id=args.resource_id, resource_endpoint=args.endpoint or ""
+            )
     if (
         not settings.deployments
+        and not account_configuration(settings, values)
         and not values.get("PTU_BATCH_DEPLOYMENTS")
         and not values.get("PTU_BATCH_PTU_DEPLOYMENT_RESOURCE_ID")
     ):
@@ -96,15 +131,51 @@ async def _preflight(args):
         )
         # Read values into this process only. Never print environment/credential files.
         values = {**json.loads(result.stdout), **values}
-    targets = deployment_configuration(settings, values)
-    async with DefaultAzureCredential() as credential:
+    account = account_configuration(settings, values)
+    credential_options = {}
+    if (
+        client_id := values.get("PTU_BATCH_MANAGED_IDENTITY_CLIENT_ID")
+        or settings.managed_identity_client_id
+    ):
+        credential_options["managed_identity_client_id"] = client_id
+    async with DefaultAzureCredential(**credential_options) as credential:
         preflight = AzurePreflight(credential)
         try:
-            for alias, target in targets.items():
-                await preflight.check(target, force=True)
-                print(
-                    json.dumps({"deployment_alias": alias, "preflight": "passed", "ptu_only": True})
-                )
+            if account is not None:
+                if args.deployment is None:
+                    await preflight.check_account(account, force=True)
+                    print(
+                        json.dumps(
+                            {
+                                "scope": "account",
+                                "preflight": "passed",
+                                "ptu_eligibility_checked": False,
+                            }
+                        )
+                    )
+                else:
+                    target = account.resolve(args.deployment).model_dump()
+                    await preflight.check(target, force=True)
+                    print(
+                        json.dumps(
+                            {
+                                "scope": "deployment",
+                                "deployment_name": args.deployment,
+                                "preflight": "passed",
+                                "ptu_only": True,
+                                "ptu_eligibility_checked": True,
+                            }
+                        )
+                    )
+            else:
+                targets = deployment_configuration(settings, values)
+                for alias, target in targets.items():
+                    await preflight.check(target, force=True)
+                    print(
+                        json.dumps(
+                            {"deployment_alias": alias, "preflight": "passed", "ptu_only": True}
+                        )
+                    )
         finally:
             await preflight.close()
 

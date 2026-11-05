@@ -4,7 +4,7 @@ import os
 import tempfile
 
 from .runtime import Runtime
-from .settings import Deployment, Settings
+from .settings import Deployment, DeploymentAccount, Settings
 
 
 async def build_runtime(settings=None):
@@ -19,7 +19,7 @@ async def build_runtime(settings=None):
         )
 
         directory = tempfile.TemporaryDirectory(prefix="ptu-batch-local-")
-        if not settings.deployments:
+        if not settings.deployments and settings.deployment_account is None:
             target = Deployment(
                 resource_endpoint="https://local.openai.azure.com/",
                 deployment_name="local-echo",
@@ -43,13 +43,16 @@ async def build_runtime(settings=None):
         "servicebus_fqdn",
     ]
     missing = [key for key in required if not getattr(settings, key)]
-    if missing or not settings.deployments:
+    has_target = settings.deployment_account is not None or bool(settings.deployments)
+    if missing or not has_target:
         raise ValueError(
             "Azure configuration is incomplete: "
-            + ", ".join(missing + ([] if settings.deployments else ["deployments"]))
+            + ", ".join(missing + ([] if has_target else ["deployments or deployment_account"]))
         )
     if settings.request_lease_seconds <= settings.inference_timeout_seconds + 60:
         raise ValueError("Request lease must exceed inference timeout plus persistence margin")
+    if settings.deployment_account is not None:
+        DeploymentAccount.model_validate(settings.deployment_account.model_dump())
     from azure.identity.aio import DefaultAzureCredential
 
     from .adapters.auth import EntraAuthenticator
@@ -62,8 +65,9 @@ async def build_runtime(settings=None):
     )
     from .adapters.preflight import AzurePreflight
 
-    for deployment in settings.deployments.values():
-        validated_deployment(deployment.model_dump())
+    if settings.deployment_account is None:
+        for deployment in settings.deployments.values():
+            validated_deployment(deployment.model_dump())
     credential = DefaultAzureCredential(
         managed_identity_client_id=settings.managed_identity_client_id or None
     )

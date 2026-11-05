@@ -17,6 +17,8 @@ DEPLOYMENT_ID = (
     f"/subscriptions/{SUB}/resourceGroups/rg-model/providers/"
     "Microsoft.CognitiveServices/accounts/aoai-test/deployments/model1"
 )
+ACCOUNT_ID = DEPLOYMENT_ID.rsplit("/deployments/", 1)[0]
+ACCOUNT_ENDPOINT = "https://aoai-test.cognitiveservices.azure.com/"
 
 
 def variables(tmp_path: Path, *, validation_only=False) -> Path:
@@ -37,6 +39,23 @@ def variables(tmp_path: Path, *, validation_only=False) -> Path:
     return path
 
 
+def account_variables(tmp_path: Path, *, validation_only=False) -> Path:
+    path = tmp_path / "private-account-variables.json"
+    path.write_text(
+        json.dumps(
+            {
+                "subscription_id": SUB,
+                "tenant_id": TENANT,
+                "environment_name": "ptubatchtf",
+                "openai_account_resource_id": ACCOUNT_ID,
+                "openai_resource_endpoint": ACCOUNT_ENDPOINT,
+                "validation_only": validation_only,
+            }
+        )
+    )
+    return path
+
+
 class FakeRunner:
     def __init__(
         self,
@@ -47,6 +66,10 @@ class FakeRunner:
         fail_guard=False,
         remote_output_error=None,
         address=None,
+        account_id=ACCOUNT_ID,
+        account_name="aoai-test",
+        account_state="Succeeded",
+        account_endpoint=ACCOUNT_ENDPOINT,
     ):
         self.calls = []
         self.sku = sku
@@ -55,14 +78,31 @@ class FakeRunner:
         self.fail_guard = fail_guard
         self.remote_output_error = remote_output_error
         self.address = address or ""
+        self.account_id = account_id
+        self.account_name = account_name
+        self.account_state = account_state
+        self.account_endpoint = account_endpoint
 
     def __call__(self, cmd, *, cwd=None, env=None, log_file=None):
         self.calls.append((list(cmd), cwd, dict(env or {}), log_file))
         if cmd[:2] == ["az", "rest"]:
-            data = {
-                "sku": {"name": self.sku, "capacity": 10},
-                "properties": {"provisioningState": "Succeeded", "spilloverDeploymentName": None},
-            }
+            if "/deployments/" in " ".join(cmd):
+                data = {
+                    "sku": {"name": self.sku, "capacity": 10},
+                    "properties": {
+                        "provisioningState": "Succeeded",
+                        "spilloverDeploymentName": None,
+                    },
+                }
+            else:
+                data = {
+                    "id": self.account_id,
+                    "name": self.account_name,
+                    "properties": {
+                        "provisioningState": self.account_state,
+                        "endpoint": self.account_endpoint,
+                    },
+                }
             return subprocess.CompletedProcess(cmd, 0, json.dumps(data), "")
         if cmd[:3] == ["terraform", "show", "-json"]:
             change = {"actions": self.actions}
@@ -119,6 +159,143 @@ def test_plan_only_prechecks_and_never_runs_guard_or_apply(tmp_path, capsys):
         for c in runner.calls
     )
     assert "secret-value" not in capsys.readouterr().out
+
+
+def test_account_only_plan_checks_account_without_deployment_name_or_model_call(tmp_path):
+    runner = FakeRunner()
+    plan = terraform_deploy.deploy(account_variables(tmp_path), tmp_path / "state", execute=runner)
+    commands = [call[0] for call in runner.calls]
+    assert plan.is_file()
+    assert commands[0][:2] == ["az", "rest"]
+    assert f"https://management.azure.com{ACCOUNT_ID}?api-version=2025-06-01" in commands[0]
+    assert "--subscription" in commands[0]
+    assert not any("/deployments/" in " ".join(command) for command in commands)
+    assert not any(command[:2] == ["terraform", "apply"] for command in commands)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("openai_account_resource_id", "not-an-account-id"),
+        ("openai_account_resource_id", DEPLOYMENT_ID),
+        ("openai_account_resource_id", ACCOUNT_ID.replace(SUB, TENANT)),
+        ("openai_resource_endpoint", "http://aoai-test.cognitiveservices.azure.com/"),
+        ("openai_resource_endpoint", "https://aoai-test.cognitiveservices.azure.com/path"),
+        ("openai_resource_endpoint", "https://user@aoai-test.cognitiveservices.azure.com/"),
+        ("openai_resource_endpoint", "https://aoai-test.cognitiveservices.azure.com/?key=x"),
+    ],
+)
+def test_account_only_rejects_malformed_scope_or_origin_before_commands(tmp_path, field, value):
+    path = account_variables(tmp_path)
+    values = json.loads(path.read_text())
+    values[field] = value
+    path.write_text(json.dumps(values))
+    runner = FakeRunner()
+    with pytest.raises(terraform_deploy.DeploymentError):
+        terraform_deploy.deploy(path, tmp_path / "state", execute=runner)
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "extra", ["ptu_deployment_resource_id", "ptu_deployment_name", "ptu_resource_endpoint"]
+)
+def test_account_only_rejects_legacy_deployment_fields(tmp_path, extra):
+    path = account_variables(tmp_path)
+    values = json.loads(path.read_text())
+    values[extra] = {
+        "ptu_deployment_resource_id": DEPLOYMENT_ID,
+        "ptu_deployment_name": "model1",
+        "ptu_resource_endpoint": "https://aoai-test.openai.azure.com/",
+    }[extra]
+    path.write_text(json.dumps(values))
+    runner = FakeRunner()
+    with pytest.raises(terraform_deploy.DeploymentError):
+        terraform_deploy.deploy(path, tmp_path / "state", execute=runner)
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "account_kwargs",
+    [
+        {"account_id": ACCOUNT_ID.replace("aoai-test", "other-account")},
+        {"account_name": "different"},
+        {"account_state": "Failed"},
+        {"account_endpoint": "https://other.cognitiveservices.azure.com/"},
+    ],
+)
+def test_account_only_arm_get_fails_closed_on_name_state_or_origin(tmp_path, account_kwargs):
+    runner = FakeRunner(**account_kwargs)
+    with pytest.raises(terraform_deploy.DeploymentError):
+        terraform_deploy.deploy(account_variables(tmp_path), tmp_path / "state", execute=runner)
+    assert [call[0][:2] for call in runner.calls] == [["az", "rest"]]
+
+
+def test_account_only_rejects_validation_only_mode(tmp_path):
+    runner = FakeRunner()
+    with pytest.raises(terraform_deploy.DeploymentError):
+        terraform_deploy.deploy(
+            account_variables(tmp_path, validation_only=True),
+            tmp_path / "state",
+            validation_only=True,
+            execute=runner,
+        )
+    assert runner.calls == []
+
+
+def test_plan_inspection_allows_only_read_only_cognitive_data_sources():
+    allowed = {
+        "resource_changes": [
+            {
+                "mode": "data",
+                "type": "azapi_resource",
+                "address": "data.azapi_resource.existing_account[0]",
+                "change": {
+                    "actions": ["read"],
+                    "after": {"type": "Microsoft.CognitiveServices/accounts@2025-06-01"},
+                },
+            },
+            {
+                "mode": "data",
+                "type": "azapi_resource",
+                "address": "data.azapi_resource.existing_deployment[0]",
+                "change": {
+                    "actions": ["read"],
+                    "after": {
+                        "type": "Microsoft.CognitiveServices/accounts/deployments@2025-06-01"
+                    },
+                },
+            },
+        ]
+    }
+    assert terraform_deploy._plan_counts(json.dumps(allowed)) == (
+        {"create": 0, "update": 0, "delete": 0},
+        [],
+    )
+    # Moving from an uncounted legacy data source to account-only count=0 can
+    # remove only Terraform's cached data-source state, never the Azure target.
+    allowed["resource_changes"][1]["change"]["actions"] = ["delete"]
+    assert terraform_deploy._plan_counts(json.dumps(allowed)) == (
+        {"create": 0, "update": 0, "delete": 0},
+        [],
+    )
+    allowed["resource_changes"][0]["mode"] = "managed"
+    with pytest.raises(terraform_deploy.DeploymentError):
+        terraform_deploy._plan_counts(json.dumps(allowed))
+    managed_account = {
+        "resource_changes": [
+            {
+                "mode": "managed",
+                "type": "azapi_resource",
+                "address": "azapi_resource.unexpected_account",
+                "change": {
+                    "actions": ["update"],
+                    "after": {"type": "Microsoft.CognitiveServices/accounts@2025-06-01"},
+                },
+            }
+        ]
+    }
+    with pytest.raises(terraform_deploy.DeploymentError):
+        terraform_deploy._plan_counts(json.dumps(managed_account))
 
 
 def test_apply_runs_fresh_guard_then_saved_plan_and_saves_public_outputs(tmp_path, capsys):

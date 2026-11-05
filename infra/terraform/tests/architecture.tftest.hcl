@@ -88,6 +88,10 @@ run "native_apps_and_safe_defaults" {
     error_message = "Application role and native Functions managed-identity settings are required."
   }
   assert {
+    condition     = contains([for env in local.common_env : env.name], "PTU_BATCH_DEPLOYMENTS") && !contains([for env in local.common_env : env.name], "PTU_BATCH_DEPLOYMENT_ACCOUNT")
+    error_message = "Legacy deployment references must keep their original runtime environment contract."
+  }
+  assert {
     condition     = azurerm_role_assignment.existing_ptu == {} && length(azurerm_role_assignment.runtime) == 12
     error_message = "The offline plan must skip existing-PTU grants but retain support-service identity grants."
   }
@@ -176,7 +180,7 @@ run "reject_invalid_image_tag_before_apply" {
 run "reject_standard_deployment_in_production" {
   command = plan
   override_data {
-    target = data.azapi_resource.existing_deployment
+    target = data.azapi_resource.existing_deployment[0]
     values = {
       output = {
         sku = {
@@ -199,7 +203,7 @@ run "validation_only_accepts_existing_standard_for_paused_smoke" {
     assign_runtime_ptu_roles = true
   }
   override_data {
-    target = data.azapi_resource.existing_deployment
+    target = data.azapi_resource.existing_deployment[0]
     values = {
       output = {
         sku = {
@@ -240,7 +244,7 @@ run "validation_only_rejects_batch_sku" {
     validation_only = true
   }
   override_data {
-    target = data.azapi_resource.existing_deployment
+    target = data.azapi_resource.existing_deployment[0]
     values = {
       output = {
         sku = {
@@ -252,6 +256,79 @@ run "validation_only_rejects_batch_sku" {
         }
       }
     }
+  }
+  expect_failures = [terraform_data.contract]
+}
+
+run "account_only_uses_jsonl_model_without_legacy_deployment_map" {
+  command = plan
+  variables {
+    openai_account_resource_id = "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/rg-existing/providers/Microsoft.CognitiveServices/accounts/aoai-existing"
+    openai_resource_endpoint   = "https://aoai-existing.cognitiveservices.azure.com/"
+    ptu_deployment_resource_id = null
+    ptu_resource_endpoint      = null
+    ptu_deployment_name        = null
+    assign_runtime_ptu_roles   = true
+  }
+  override_data {
+    target = data.azapi_resource.existing_account[0]
+    values = {
+      output = {
+        id   = "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/rg-existing/providers/Microsoft.CognitiveServices/accounts/aoai-existing"
+        name = "aoai-existing"
+        properties = {
+          provisioningState = "Succeeded"
+          endpoint          = "https://aoai-existing.cognitiveservices.azure.com/"
+        }
+      }
+    }
+  }
+  assert {
+    condition     = !contains([for env in local.common_env : env.name], "PTU_BATCH_DEPLOYMENTS") && contains([for env in local.common_env : env.name], "PTU_BATCH_DEPLOYMENT_ACCOUNT")
+    error_message = "Account mode must emit account configuration without a legacy per-deployment map."
+  }
+  assert {
+    condition     = jsondecode(one([for env in local.common_env : env.value if env.name == "PTU_BATCH_DEPLOYMENT_ACCOUNT"])).resource_id == var.openai_account_resource_id && jsondecode(one([for env in local.common_env : env.value if env.name == "PTU_BATCH_DEPLOYMENT_ACCOUNT"])).resource_endpoint == var.openai_resource_endpoint && toset(jsondecode(one([for env in local.common_env : env.value if env.name == "PTU_BATCH_DEPLOYMENT_ACCOUNT"])).allowed_apis) == toset(var.allowed_apis) && length(keys(jsondecode(one([for env in local.common_env : env.value if env.name == "PTU_BATCH_DEPLOYMENT_ACCOUNT"])))) == 4
+    error_message = "Account configuration must leave deployment resolution to each JSONL model value."
+  }
+  assert {
+    condition     = output.deployment_resolution == "jsonl_model" && output.openai_account_resource_id == var.openai_account_resource_id && output.openai_resource_endpoint == var.openai_resource_endpoint
+    error_message = "Account-only output must identify the account and JSONL routing mode."
+  }
+  assert {
+    condition     = toset(keys(azurerm_role_assignment.existing_ptu)) == toset(["openai_user", "reader"]) && alltrue([for role in values(azurerm_role_assignment.existing_ptu) : role.scope == var.openai_account_resource_id])
+    error_message = "The existing runtime role addresses must grant account-level access in JSONL routing mode."
+  }
+}
+
+run "account_only_rejects_legacy_fields" {
+  command = plan
+  variables {
+    openai_account_resource_id = "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/rg-existing/providers/Microsoft.CognitiveServices/accounts/aoai-existing"
+    openai_resource_endpoint   = "https://aoai-existing.cognitiveservices.azure.com/"
+  }
+  expect_failures = [var.openai_account_resource_id]
+}
+
+run "reject_missing_account_and_deployment_references" {
+  command = plan
+  variables {
+    ptu_deployment_resource_id = null
+    ptu_resource_endpoint      = null
+    ptu_deployment_name        = null
+  }
+  expect_failures = [var.openai_account_resource_id]
+}
+
+run "account_only_rejects_validation_only" {
+  command = plan
+  variables {
+    openai_account_resource_id = "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/rg-existing/providers/Microsoft.CognitiveServices/accounts/aoai-existing"
+    openai_resource_endpoint   = "https://aoai-existing.cognitiveservices.azure.com/"
+    ptu_deployment_resource_id = null
+    ptu_resource_endpoint      = null
+    ptu_deployment_name        = null
+    validation_only            = true
   }
   expect_failures = [terraform_data.contract]
 }

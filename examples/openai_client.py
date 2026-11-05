@@ -23,7 +23,10 @@ def client_from_environment() -> OpenAI:
 
 def main() -> None:
     client = client_from_environment()
-    sample = Path(__file__).with_name("chat.jsonl")
+    sample_name = (
+        "local-chat.jsonl" if str(client.base_url).startswith("http://127.0.0.1") else "chat.jsonl"
+    )
+    sample = Path(__file__).with_name(sample_name)
     with sample.open("rb") as handle:
         uploaded = client.files.create(file=handle, purpose="batch")
     batch = client.batches.create(

@@ -5,7 +5,7 @@ This procedure provisions accelerator infrastructure and role assignments. It do
 ## Prerequisites
 
 - Azure CLI, Azure Developer CLI (`azd`), Docker, Python 3.12, and `uv`.
-- An existing Azure OpenAI **provisioned throughput** deployment with spillover disabled, reachable from the Container Apps environment. Private-only PTUs require VNet/private DNS configuration beyond this baseline. Record its full ARM deployment resource ID, Azure OpenAI account endpoint, and deployment name. The runtime preflight checks these values and rejects non-PTU or spillover configuration; do not override a failed check.
+- An existing Azure OpenAI **provisioned throughput** deployment with spillover disabled, reachable from the Container Apps environment. Private-only PTUs require VNet/private DNS configuration beyond this baseline. Record the trusted account ARM ID and matching Azure OpenAI account endpoint. Users select the actual deployment name in JSONL `body.model`; no deployment-name or alias map is required on the server. Whole-file validation checks the chosen deployment and rejects non-PTU or spillover configuration.
 - Subscription-scope permission for `Microsoft.Resources/deployments/write` and `Microsoft.Resources/subscriptions/resourceGroups/write`: the template is a subscription deployment and creates the accelerator resource group. The provisioner also needs permission to create resources and role assignments in that group. Subscription **Contributor** plus **User Access Administrator** (or equivalent rights) covers the accelerator's first provision; resource-group-only permissions do not. On the existing Azure OpenAI account, the provisioner needs **Reader** and `Microsoft.Authorization/roleAssignments/write`; it also needs `Microsoft.Resources/deployments/write` on that account's resource group because Bicep deploys the role-assignment module there. This can span subscriptions in the same tenant. The template grants the runtime identity `Cognitive Services OpenAI User` and `Reader` on the existing account.
 - `AcrPush` on the new registry for the principal running `azd deploy`, so azd can push the three images. This is separate from the runtime identity's `AcrPull` assignment. Grant it after `azd provision` if the deployer does not already have equivalent rights.
 - An Entra API app/client ID in the same tenant. The API expects audience equal to this app ID and the `Batch.ReadWrite` delegated scope or `Batch.ReadWrite.Application` application role.
@@ -27,13 +27,11 @@ azd env set AZURE_SUBSCRIPTION_ID '<accelerator-subscription-guid>'
 azd env set AZURE_LOCATION eastus
 azd env set PTU_BATCH_TENANT_ID '<tenant-guid>'
 azd env set PTU_BATCH_AUDIENCE '<accelerator-api-app-guid>'
-azd env set PTU_BATCH_PTU_DEPLOYMENT_RESOURCE_ID '/subscriptions/<subscription>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<account>/deployments/<ptu-deployment>'
+azd env set PTU_BATCH_PTU_ACCOUNT_RESOURCE_ID '/subscriptions/<subscription>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<account>'
 azd env set PTU_BATCH_PTU_RESOURCE_ENDPOINT 'https://<account>.openai.azure.com/'
-azd env set PTU_BATCH_PTU_DEPLOYMENT_NAME '<ptu-deployment>'
-azd env set PTU_BATCH_PTU_ALIAS 'ptu'
 ```
 
-No keys or secrets are required for runtime connections. Keep `.azure/` and local credential files out of source control. The `PTU_BATCH_PTU_*` values describe one existing deployment; the template permits Chat Completions and Responses for that alias. Change `allowedApis` in the Bicep parameters only after verifying the existing deployment and runtime support.
+No keys or secrets are required for runtime connections. Keep `.azure/` and local credential files out of source control. The `PTU_BATCH_PTU_ACCOUNT_RESOURCE_ID` and `PTU_BATCH_PTU_RESOURCE_ENDPOINT` values identify one trusted account. Its endpoint must match the ARM account endpoint. The template permits Chat Completions and Responses, subject to runtime deployment capability checks. A user supplies the actual PTU name in the uploaded JSONL. Legacy explicit deployment/alias parameters remain supported in Bicep when the account parameter is omitted. Existing azd environments should set the new account variable for the supplied parameter file, or supply their own legacy parameter file.
 
 ## Provision and deploy
 
@@ -68,16 +66,16 @@ The first deployment may need a short delay for managed identity role propagatio
 
 ## Opt-in smoke test
 
-The script prints the selected sample in dry-run mode and makes no Azure calls. `--create-job` uses a refreshing Entra token provider, uploads one JSONL file, creates a **billable** batch, polls for completion (900 seconds by default), downloads its output, and verifies the expected `custom_id` values, HTTP 2xx responses, and zero failed requests. It exits nonzero on failure or timeout and requests cancellation of an unfinished job on timeout. `--deployment-alias` defaults to `ptu`:
+The script prints the selected sample in dry-run mode and makes no Azure calls. `--create-job` uses a refreshing Entra token provider, uploads one JSONL file, creates a **billable** batch, polls for completion (900 seconds by default), downloads its output, and verifies the expected `custom_id` values, HTTP 2xx responses, and zero failed requests. It exits nonzero on failure or timeout and requests cancellation of an unfinished job on timeout. The JSONL `body.model` is preserved by default. Edit the sample replacement marker or pass your own file with `--input-file`. An optional `--deployment-name` overrides the model in the client-side sample only; it is not server configuration:
 
 ```bash
 uv run --locked --all-extras python scripts/smoke_test.py \
   --base-url 'https://<api-fqdn>/openai/v1/' \
-  --app-id '<accelerator-api-app-guid>' --kind chat
+  --app-id '<accelerator-api-app-guid>' --input-file ./chat.jsonl
 
 uv run --locked --all-extras python scripts/smoke_test.py \
   --base-url 'https://<api-fqdn>/openai/v1/' \
-  --app-id '<accelerator-api-app-guid>' --kind responses --create-job
+  --app-id '<accelerator-api-app-guid>' --input-file ./chat.jsonl --create-job
 ```
 
 The manually dispatched GitHub workflow uses OIDC and also requires an explicit `create_job` input. It never deploys resources. The GitHub OIDC identity must itself be granted the `Batch.ReadWrite.Application` application role; Azure subscription RBAC alone does not authorize the API.

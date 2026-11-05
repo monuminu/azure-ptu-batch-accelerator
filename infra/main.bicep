@@ -14,16 +14,19 @@ param tenantId string
 @description('Application/client ID of the customer-owned accelerator API registration.')
 param acceleratorAppId string
 
-@description('Full resource ID of one existing Azure OpenAI PTU deployment. No deployment is created or modified.')
-param ptuDeploymentResourceId string
+@description('Full resource ID of an existing Azure OpenAI account. Model deployment names come from JSONL requests; no model deployment is created or modified.')
+param ptuAccountResourceId string = ''
 
 @description('HTTPS endpoint of the existing Azure OpenAI account.')
 param ptuResourceEndpoint string
 
-@description('Name of the existing PTU deployment.')
-param ptuDeploymentName string
+@description('Legacy full resource ID of one existing PTU deployment, used only when ptuAccountResourceId is empty.')
+param ptuDeploymentResourceId string = ''
 
-@description('Public alias exposed by the accelerator API.')
+@description('Legacy name of the existing PTU deployment.')
+param ptuDeploymentName string = ''
+
+@description('Legacy public alias exposed by the accelerator API.')
 param ptuAlias string = 'ptu'
 
 @description('Allowed API paths for this deployment. The runtime validates these paths.')
@@ -42,7 +45,7 @@ param controlExists bool = false
 param inferenceExists bool = false
 
 var resourceGroupName = 'rg-${environmentName}-ptu-batch'
-var resourceIdParts = split(ptuDeploymentResourceId, '/')
+var resourceIdParts = split(!empty(ptuAccountResourceId) ? ptuAccountResourceId : ptuDeploymentResourceId, '/')
 var aoaiSubscriptionId = resourceIdParts[2]
 var aoaiResourceGroupName = resourceIdParts[4]
 var aoaiAccountName = resourceIdParts[8]
@@ -64,6 +67,7 @@ module resources './resources.bicep' = {
     location: location
     tenantId: tenantId
     acceleratorAppId: acceleratorAppId
+    ptuAccountResourceId: ptuAccountResourceId
     ptuDeploymentResourceId: ptuDeploymentResourceId
     ptuResourceEndpoint: ptuResourceEndpoint
     ptuDeploymentName: ptuDeploymentName

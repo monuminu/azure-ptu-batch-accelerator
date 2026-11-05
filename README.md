@@ -27,7 +27,7 @@ All three apps share one Azure Container Apps Consumption environment. Control a
 
 Open the [presenter notebook](examples/ptu_batch_demo.ipynb) in VS Code/JupyterLab and select a Python 3.12 kernel. Install [notebook requirements](examples/requirements-notebook.txt), configure the accelerator URL, tenant, and API application ID, and sign in with Azure CLI.
 
-Part A demonstrates live Entra authentication, Files upload/retrieve/download, batch listing, and paused admission. Part B contains the full PTU upload → submit → poll → output workflow and remains disabled until a real PTU is configured and admission is resumed. The notebook embeds the architecture diagram, uses generic support-ticket data, and never prints bearer tokens or substitutes synthetic model results.
+Part A demonstrates live Entra authentication, Files upload/retrieve/download, batch listing, and paused admission. Part B contains the full PTU upload → submit → poll → output workflow and remains disabled until a real PTU is configured and admission is resumed. The notebook embeds the architecture diagram, uses generic support-ticket data, and never prints bearer tokens or substitutes synthetic model results. Supply the actual deployment name in `body.model`; no deployment-alias registration is required in account mode.
 
 For a configured Global Provisioned deployment, use the [Global PTU showcase notebook](examples/global_ptu_demo.ipynb). Its shared version keeps real submissions off until the operator checks the target and enables the run switch. See the [Global PTU demo operating guide](docs/global-ptu-demo.md) for preflight, admission, and hourly-billing considerations.
 
@@ -63,7 +63,7 @@ A native AzureRM/AzAPI template is available in [infra/terraform](infra/terrafor
 
 ## API shape
 
-The OpenAI SDK base URL is `{API_ENDPOINT_URL}/openai/v1/`. Supported operations include `files.create`, `files.content`, `batches.create`, `batches.retrieve`, `batches.list`, and `batches.cancel`. JSONL rows use `/v1/chat/completions` or `/v1/responses`, with `body.model` set to the configured public alias. Batch creation accepts `/chat/completions` or `/responses` as the advisory endpoint (also accepting `/v1/...` forms). See [chat](examples/chat.jsonl) and [Responses](examples/responses.jsonl) examples.
+The OpenAI SDK base URL is `{API_ENDPOINT_URL}/openai/v1/`. Supported operations include `files.create`, `files.content`, `batches.create`, `batches.retrieve`, `batches.list`, and `batches.cancel`. JSONL rows use `/v1/chat/completions` or `/v1/responses`, with `body.model` set to the actual Azure PTU deployment name. The account is configured once; deployment names are resolved from each JSONL file without a server-side alias entry. Batch creation accepts `/chat/completions` or `/responses` as the advisory endpoint (also accepting `/v1/...` forms). See [chat](examples/chat.jsonl) and [Responses](examples/responses.jsonl) examples.
 
 | Capability | Status |
 | --- | --- |
@@ -76,6 +76,16 @@ The OpenAI SDK base URL is `{API_ENDPOINT_URL}/openai/v1/`. Supported operations
 | Stateful tools or cross-row state | Unsupported |
 | Reuse of remote file IDs as input | Unsupported |
 | Automatic scheduling or idle-PTU detection | Unsupported |
+
+### Deployment name comes from JSONL
+
+Configure the trusted Azure OpenAI account once with `openai_account_resource_id` and `openai_resource_endpoint` in Terraform. Each file then selects its PTU deployment in `body.model`, exactly as in the Azure Batch tutorial:
+
+```json
+{"custom_id":"task-0","method":"POST","url":"/v1/chat/completions","body":{"model":"accelerator-demo-global-ptu","messages":[{"role":"user","content":"When was Microsoft founded?"}]}}
+```
+
+The accelerator resolves this literal name within that account, checks caller access and PTU eligibility, validates the whole file, and snapshots the resolved target. New PTU deployments in the account need no alias-map update. Unknown names, Standard deployments, arbitrary URLs/path-like names, and mixed-deployment files are rejected before inference. See [deployment-name routing](docs/deployment-name-routing.md). Legacy explicit alias mappings remain supported for existing configurations and accepted jobs.
 
 Unknown inference outcomes are recorded and are **not replayed by default**, to avoid duplicate charges or effects. Cancel is cooperative; a request already running is not preempted. See the [recovery runbook](docs/operations.md).
 

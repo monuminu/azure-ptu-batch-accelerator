@@ -11,16 +11,30 @@ from urllib.parse import urlparse
 
 
 def run_smoke(
-    client, sample: Path, *, timeout_seconds=900, poll_interval=10, deployment_alias=None
+    client,
+    sample: Path,
+    *,
+    timeout_seconds=900,
+    poll_interval=10,
+    deployment_name=None,
+    deployment_alias=None,
 ):
-    rows = [json.loads(line) for line in sample.read_text().splitlines() if line.strip()]
+    data = sample.read_bytes()
+    rows = [json.loads(line) for line in data.decode("utf-8").splitlines() if line.strip()]
     if not rows:
         raise ValueError("Smoke input is empty")
-    if deployment_alias:
+    if deployment_name and deployment_alias and deployment_name != deployment_alias:
+        raise ValueError("Provide one deployment name")
+    override = deployment_name or deployment_alias
+    if override:
         for row in rows:
-            row["body"]["model"] = deployment_alias
+            row["body"]["model"] = override
+        data = b"".join(json.dumps(row).encode() + b"\n" for row in rows)
+    if any(
+        row.get("body", {}).get("model") == "REPLACE-WITH-MODEL-DEPLOYMENT-NAME" for row in rows
+    ):
+        raise ValueError("Set the actual deployment name in JSONL body.model or --deployment-name")
     expected = {row["custom_id"] for row in rows}
-    data = b"".join(json.dumps(row).encode() + b"\n" for row in rows)
     uploaded = client.files.create(
         file=(sample.name, io.BytesIO(data)),
         purpose="batch",
@@ -72,7 +86,12 @@ def main():
     )
     parser.add_argument("--app-id", required=True, help="Accelerator Entra app/client ID")
     parser.add_argument("--kind", choices=("chat", "responses"), default="chat")
-    parser.add_argument("--deployment-alias", default="ptu")
+    parser.add_argument(
+        "--deployment-name", help="Optional client-side override for JSONL body.model"
+    )
+    parser.add_argument("--deployment-alias", help=argparse.SUPPRESS)
+    parser.add_argument("--input-file", type=Path, help="Use an existing JSONL file as-is")
+    parser.add_argument("--tenant-id", help="Tenant for delegated Azure CLI authentication")
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--create-job", action="store_true", help="Makes billable Azure requests")
     args = parser.parse_args()
@@ -85,17 +104,22 @@ def main():
         parser.error("--base-url must be an HTTPS accelerator URL ending in /openai/v1/")
     if args.timeout_seconds < 1:
         parser.error("--timeout-seconds must be positive")
-    sample = Path(__file__).resolve().parents[1] / "examples" / f"{args.kind}.jsonl"
-    print(f"Prepared {sample.name} for deployment alias {args.deployment_alias}")
+    sample = (
+        args.input_file or Path(__file__).resolve().parents[1] / "examples" / f"{args.kind}.jsonl"
+    )
+    print(f"Prepared {sample.name}; deployment names are supplied in JSONL body.model")
     if not args.create_job:
         print(
             "Dry run only. Add --create-job to upload, submit, poll, and verify a billable batch."
         )
         return
-    from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+    from azure.identity import AzureCliCredential, DefaultAzureCredential, get_bearer_token_provider
     from openai import OpenAI
 
-    with DefaultAzureCredential() as credential:
+    selected_credential = (
+        AzureCliCredential(tenant_id=args.tenant_id) if args.tenant_id else DefaultAzureCredential()
+    )
+    with selected_credential as credential:
         token_provider = get_bearer_token_provider(credential, f"api://{args.app_id}/.default")
         with OpenAI(base_url=args.base_url, api_key=token_provider, max_retries=0) as client:
             print(
@@ -104,6 +128,7 @@ def main():
                         client,
                         sample,
                         timeout_seconds=args.timeout_seconds,
+                        deployment_name=args.deployment_name,
                         deployment_alias=args.deployment_alias,
                     ),
                     indent=2,

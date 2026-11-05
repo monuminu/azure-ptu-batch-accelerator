@@ -6,10 +6,8 @@
     "location": { "value": "${AZURE_LOCATION}" },
     "tenantId": { "value": "${PTU_BATCH_TENANT_ID}" },
     "acceleratorAppId": { "value": "${PTU_BATCH_AUDIENCE}" },
-    "ptuDeploymentResourceId": { "value": "${PTU_BATCH_PTU_DEPLOYMENT_RESOURCE_ID}" },
+    "ptuAccountResourceId": { "value": "${PTU_BATCH_PTU_ACCOUNT_RESOURCE_ID}" },
     "ptuResourceEndpoint": { "value": "${PTU_BATCH_PTU_RESOURCE_ENDPOINT}" },
-    "ptuDeploymentName": { "value": "${PTU_BATCH_PTU_DEPLOYMENT_NAME}" },
-    "ptuAlias": { "value": "${PTU_BATCH_PTU_ALIAS}" },
     "apiExists": { "value": "${SERVICE_API_RESOURCE_EXISTS}" },
     "controlExists": { "value": "${SERVICE_CONTROL_RESOURCE_EXISTS}" },
     "inferenceExists": { "value": "${SERVICE_INFERENCE_RESOURCE_EXISTS}" }

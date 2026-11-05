@@ -1,7 +1,8 @@
 """Private Terraform plan/apply wrapper with a fresh deployment drain gate.
 
 Use this wrapper for every apply, including retries. It does not create, edit,
-or invoke an Azure OpenAI model deployment; the precheck is an ARM GET only.
+or invoke an Azure OpenAI model deployment; account and legacy deployment
+prechecks use read-only ARM GETs only.
 """
 
 from __future__ import annotations
@@ -40,6 +41,9 @@ PUBLIC_OUTPUTS = {
     "managed_identity_principal_id",
     "servicebus_namespace",
     "ptu_alias",
+    "openai_account_resource_id",
+    "openai_resource_endpoint",
+    "deployment_resolution",
     "validation_only",
     "validation_only_warning",
 }
@@ -56,6 +60,15 @@ _DEPLOYMENT_ID = re.compile(
     r"^/subscriptions/([0-9a-fA-F-]{36})/resourceGroups/[^/]+/providers/"
     r"Microsoft\.CognitiveServices/accounts/[^/]+/deployments/([^/]+)$",
     re.IGNORECASE,
+)
+_ACCOUNT_ID = re.compile(
+    r"^/subscriptions/([0-9a-fA-F-]{36})/resourceGroups/[^/]+/providers/"
+    r"Microsoft\.CognitiveServices/accounts/([^/]+)$",
+    re.IGNORECASE,
+)
+_ORIGIN = re.compile(r"^https://[A-Za-z0-9][A-Za-z0-9.-]*/?$")
+_READ_ONLY_REFERENCE = re.compile(
+    r"^data\.azapi_resource\.(?:existing_account|existing_deployment)(?:\[0\])?$"
 )
 
 
@@ -220,28 +233,89 @@ def _load_variables(path: Path, validation_only: bool) -> dict[str, Any]:
     tenant = values.get("tenant_id")
     env_name = values.get("environment_name", "ptubatchtf")
     resource_id = values.get("ptu_deployment_resource_id")
+    account_id = values.get("openai_account_resource_id")
+    account_endpoint = values.get("openai_resource_endpoint")
     if not isinstance(subscription, str) or not _GUID.fullmatch(subscription):
         raise DeploymentError("subscription_id must be an explicit GUID")
     if not isinstance(tenant, str) or not _GUID.fullmatch(tenant):
         raise DeploymentError("tenant_id must be an explicit GUID")
     if not isinstance(env_name, str) or not _ENV_NAME.fullmatch(env_name):
         raise DeploymentError("environment_name is invalid")
-    if not isinstance(resource_id, str) or not (match := _DEPLOYMENT_ID.fullmatch(resource_id)):
-        raise DeploymentError("ptu_deployment_resource_id must be an existing deployment ARM ID")
-    if match.group(1).lower() != subscription.lower():
-        raise DeploymentError("Deployment reference must be in the requested subscription")
-    if match.group(2).lower() != str(values.get("ptu_deployment_name", "")).lower():
-        raise DeploymentError("Deployment name must match the ARM ID")
     if values.get("validation_only", False) is not validation_only:
         raise DeploymentError(
             "--validation-only must exactly match validation_only in the variable file"
         )
+    if account_id is not None or account_endpoint is not None:
+        if validation_only:
+            raise DeploymentError("Account-only JSONL routing cannot use validation_only")
+        if any(
+            values.get(field) is not None
+            for field in (
+                "ptu_deployment_resource_id",
+                "ptu_deployment_name",
+                "ptu_resource_endpoint",
+            )
+        ):
+            raise DeploymentError("Account-only JSONL routing cannot mix legacy deployment fields")
+        if not isinstance(account_id, str) or not (match := _ACCOUNT_ID.fullmatch(account_id)):
+            raise DeploymentError("openai_account_resource_id must be an existing account ARM ID")
+        if match.group(1).lower() != subscription.lower():
+            raise DeploymentError("Account reference must be in the requested subscription")
+        if not isinstance(account_endpoint, str) or not _ORIGIN.fullmatch(account_endpoint):
+            raise DeploymentError("openai_resource_endpoint must be a plain HTTPS origin")
+    else:
+        if not isinstance(resource_id, str) or not (match := _DEPLOYMENT_ID.fullmatch(resource_id)):
+            raise DeploymentError(
+                "ptu_deployment_resource_id must be an existing deployment ARM ID"
+            )
+        if match.group(1).lower() != subscription.lower():
+            raise DeploymentError("Deployment reference must be in the requested subscription")
+        if match.group(2).lower() != str(values.get("ptu_deployment_name", "")).lower():
+            raise DeploymentError("Deployment name must match the ARM ID")
     return values
 
 
 def _check_deployment(
     values: Mapping[str, Any], *, execute: Callable, env: Mapping[str, str], validation_only: bool
 ) -> None:
+    account_id = values.get("openai_account_resource_id")
+    if account_id is not None:
+        command = [
+            "az",
+            "rest",
+            "--method",
+            "get",
+            "--url",
+            f"https://management.azure.com{account_id}?api-version=2025-06-01",
+            "--subscription",
+            values["subscription_id"],
+            "--output",
+            "json",
+            "--only-show-errors",
+        ]
+        raw = _run(execute, command, cwd=None, env=env, phase="Existing account ARM GET")
+        try:
+            data = json.loads(raw)
+            actual_id = data["id"]
+            name = data["name"]
+            state = data["properties"]["provisioningState"]
+            endpoint = data["properties"]["endpoint"]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise DeploymentError("Existing account response is incomplete") from exc
+        if not all(isinstance(value, str) for value in (actual_id, name, state, endpoint)):
+            raise DeploymentError("Existing account response is incomplete")
+        if (
+            actual_id.lower() != account_id.lower()
+            or name.lower() != account_id.rsplit("/", 1)[-1].lower()
+        ):
+            raise DeploymentError(
+                "Existing account ID or name does not match the requested account"
+            )
+        if state.lower() != "succeeded":
+            raise DeploymentError("Existing account provisioning state must be Succeeded")
+        if endpoint.rstrip("/").lower() != values["openai_resource_endpoint"].rstrip("/").lower():
+            raise DeploymentError("Existing account endpoint does not match the requested origin")
+        return
     resource_id = values["ptu_deployment_resource_id"]
     command = [
         "az",
@@ -336,17 +410,29 @@ def _plan_counts(raw: str) -> tuple[dict[str, int], list[dict[str, Any]]]:
             before = details.get("before") or {}
             after = details.get("after") or {}
             azapi_types = [before.get("type", ""), after.get("type", "")]
+            actions = details["actions"]
+            if (
+                change.get("mode") == "data"
+                and change.get("type") == "azapi_resource"
+                and _READ_ONLY_REFERENCE.fullmatch(change.get("address", ""))
+                # Deleting a data-source address only drops Terraform's cached
+                # read result when legacy routing is replaced by account mode.
+                and actions in (["read"], ["no-op"], ["delete"])
+            ):
+                continue
             if (
                 change.get("type", "").startswith("azurerm_cognitive_")
                 or "existing_deployment" in change.get("address", "")
+                or "existing_account" in change.get("address", "")
                 or any(
-                    value.lower().startswith("microsoft.cognitiveservices/accounts/deployments@")
+                    value.lower().startswith("microsoft.cognitiveservices/")
                     for value in azapi_types
                     if isinstance(value, str)
                 )
             ):
-                raise DeploymentError("The referenced Azure OpenAI deployment cannot be modified")
-            actions = change["change"]["actions"]
+                raise DeploymentError(
+                    "The referenced Azure OpenAI account or deployment cannot be modified"
+                )
             for action in counts:
                 if action in actions:
                     counts[action] += 1
@@ -417,7 +503,11 @@ def deploy(
             }
         )
 
-        emit("Checking existing model deployment with a read-only ARM GET")
+        emit(
+            "Checking existing Azure OpenAI account with a read-only ARM GET"
+            if values.get("openai_account_resource_id") is not None
+            else "Checking existing model deployment with a read-only ARM GET"
+        )
         _check_deployment(values, execute=execute, env=command_env, validation_only=validation_only)
         if validation_only:
             emit("VALIDATION ONLY: keep admission paused; make no model calls")
